@@ -1,21 +1,27 @@
-```txt
-npm install
-npm run dev
-```
+# 🇮🇳 India NewsShorts
 
-```txt
-npm run deploy
-```
+A live India news app with topic filters — built with Hono + Cloudflare Pages.
 
-[For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
+## 🌐 Live URLs
+- **Production**: https://india-newshorts.pages.dev
+- **GitHub**: https://github.com/nd905/India-News
 
-```txt
-npm run cf-typegen
-```
+## 📰 Features
+- 5 topic filters: All India, Critical, Politics, Social Issues, Economy
+- Auto-refreshes every 5 minutes
+- Save favourite articles
+- Read full articles (opens source)
+- Keyboard navigation (← →)
+- Mobile-friendly design
+- API key safely hidden on server
 
-Pass the `CloudflareBindings` as generics when instantiation `Hono`:
+## 🛠 Tech Stack
+- **Backend**: Hono framework (Cloudflare Workers)
+- **Frontend**: Vanilla JS + Tailwind CSS (CDN)
+- **Hosting**: Cloudflare Pages (FREE)
+- **News data**: NewsAPI.org
 
-```ts
-// src/index.ts
-const app = new Hono<{ Bindings: CloudflareBindings }>()
-```
+## 🚀 Deployment
+- **Platform**: Cloudflare Pages
+- **Status**: ✅ Active
+- **Last deployed**: 2026-02-23
