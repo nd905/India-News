@@ -55,31 +55,29 @@ app.get('/api/news', async (c) => {
 
 // ── 2. TWITTER / NITTER FEED ──────────────────────────────────────────────────
 // Uses Nitter RSS (free, no API key needed) to get any public Twitter timeline
+// nitter.net is the primary working instance as of 2026
 app.get('/api/twitter', async (c) => {
-  const username = c.req.query('username') || c.env?.TWITTER_USERNAME || ''
+  const username = c.req.query('username') || c.env?.TWITTER_USERNAME || 'Sj89Jain'
 
   if (!username) {
     return c.json({ success: false, error: 'No Twitter username provided' }, 400)
   }
 
-  // Try multiple Nitter instances in order
+  // nitter.net is the primary working instance; xcancel as fallback (needs Accept header)
   const nitterInstances = [
-    `https://nitter.net/${username}/rss`,
-    `https://nitter.privacydev.net/${username}/rss`,
-    `https://nitter.poast.org/${username}/rss`,
+    { url: `https://nitter.net/${username}/rss`,     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RSS-Reader/1.0)', 'Accept': 'application/rss+xml, text/xml, */*' } },
+    { url: `https://xcancel.com/${username}/rss`,    headers: { 'User-Agent': 'FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)', 'Accept': 'application/rss+xml, text/xml' } },
+    { url: `https://nitter.poast.org/${username}/rss`, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RSS-Reader/1.0)', 'Accept': 'application/rss+xml, text/xml, */*' } },
   ]
 
   let xmlText = ''
   let worked  = false
 
-  for (const url of nitterInstances) {
+  for (const instance of nitterInstances) {
     try {
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; India-NewsShorts/1.0)',
-          'Accept': 'application/rss+xml, application/xml, text/xml',
-        },
-        signal: AbortSignal.timeout(5000),
+      const res = await fetch(instance.url, {
+        headers: instance.headers,
+        signal: AbortSignal.timeout(6000),
       })
       if (res.ok) {
         xmlText = await res.text()
@@ -89,15 +87,15 @@ app.get('/api/twitter', async (c) => {
   }
 
   if (!worked) {
-    // Return helpful demo tweets if all Nitter instances fail
+    // Return helpful message if all instances fail
     return c.json({
       success: true,
       articles: [
         {
-          id: 'tw-demo-1', type: 'twitter',
+          id: 'tw-offline-1', type: 'twitter',
           category: `@${username}`,
-          headline: `Live tweets from @${username} will appear here`,
-          summary: 'Nitter (the free Twitter mirror) may be temporarily down. Your real tweets will show when it comes back online. Try refreshing in a few minutes.',
+          headline: `Tweets from @${username} are temporarily unavailable`,
+          summary: 'The Twitter mirror (nitter.net) is down right now. This happens sometimes. Please tap Refresh in a few minutes — your real tweets will show up automatically.',
           image: `https://unavatar.io/twitter/${username}`,
           source: `@${username} on X/Twitter`,
           time: 'Just now',
@@ -106,7 +104,7 @@ app.get('/api/twitter', async (c) => {
           isTwitter: true,
         }
       ],
-      info: 'Nitter temporarily unavailable — showing placeholder'
+      info: 'Nitter temporarily unavailable'
     })
   }
 
@@ -263,7 +261,7 @@ app.get('/', (c) => {
       <button onclick="changeTopic('politics')" id="tab-politics" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white/10 text-purple-200">🏛️ Politics</button>
       <button onclick="changeTopic('social')"   id="tab-social"   class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white/10 text-purple-200">👥 Social</button>
       <button onclick="changeTopic('economy')"  id="tab-economy"  class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white/10 text-purple-200">💰 Economy</button>
-      <button onclick="changeTopic('twitter')"  id="tab-twitter"  class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white/10 text-blue-300">𝕏 My Feed</button>
+      <button onclick="changeTopic('twitter')"  id="tab-twitter"  class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white/10 text-blue-300">𝕏 @Sj89Jain</button>
     </div>
   </div>
 </header>
@@ -391,7 +389,7 @@ let articles     = [];
 let currentIndex = 0;
 let savedIds     = new Set(JSON.parse(localStorage.getItem('savedIds') || '[]'));
 let currentTopic = 'all';
-let twitterUser  = localStorage.getItem('twitterUsername') || '';
+let twitterUser  = localStorage.getItem('twitterUsername') || 'Sj89Jain';
 let refreshTimer = null;
 let deferredInstall = null;
 
@@ -598,6 +596,9 @@ function saveTwitterUsername() {
   if (!val) return;
   twitterUser = val;
   localStorage.setItem('twitterUsername', val);
+  // Update tab label
+  const twitterTab = document.getElementById('tab-twitter');
+  if (twitterTab) twitterTab.textContent = '𝕏 @' + val;
   closeTwitterModal();
   changeTopic('twitter');
 }
@@ -644,19 +645,16 @@ function startAutoRefresh() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
+// Update Twitter tab label with saved username
+const twitterTab = document.getElementById('tab-twitter');
+if (twitterTab && twitterUser) twitterTab.textContent = '𝕏 @' + twitterUser;
+
 fetchNews('all');
 startAutoRefresh();
 
-// Show Twitter setup tip if no username saved yet
-if (!twitterUser) {
-  setTimeout(() => {
-    const tip = document.createElement('div');
-    tip.id = 'twitterTip';
-    tip.className = 'fixed bottom-20 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg z-40 whitespace-nowrap';
-    tip.innerHTML = '<i class="fab fa-x-twitter mr-1"></i> Tap 𝕏 to add your Twitter feed!';
-    document.body.appendChild(tip);
-    setTimeout(() => tip.remove(), 4000);
-  }, 2000);
+// Show Twitter setup tip only if user hasn't set a custom username
+if (localStorage.getItem('twitterUsername') === null) {
+  // Default is already @Sj89Jain - no tip needed
 }
 </script>
 </body>
