@@ -53,114 +53,16 @@ app.get('/api/news', async (c) => {
   }
 })
 
-// ── 2. TWITTER / NITTER FEED ──────────────────────────────────────────────────
-// Uses Nitter RSS (free, no API key needed) to get any public Twitter timeline
-// nitter.net is the primary working instance as of 2026
-app.get('/api/twitter', async (c) => {
+// ── 2. TWITTER FEED CONFIG ENDPOINT ─────────────────────────────────────────
+// Returns the nitter RSS URL for the frontend to fetch directly (browser is not blocked)
+app.get('/api/twitter-config', async (c) => {
   const username = c.req.query('username') || c.env?.TWITTER_USERNAME || 'Sj89Jain'
-
-  if (!username) {
-    return c.json({ success: false, error: 'No Twitter username provided' }, 400)
-  }
-
-  // nitter.net is the primary working instance; xcancel as fallback (needs Accept header)
-  const nitterInstances = [
-    { url: `https://nitter.net/${username}/rss`,     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RSS-Reader/1.0)', 'Accept': 'application/rss+xml, text/xml, */*' } },
-    { url: `https://xcancel.com/${username}/rss`,    headers: { 'User-Agent': 'FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)', 'Accept': 'application/rss+xml, text/xml' } },
-    { url: `https://nitter.poast.org/${username}/rss`, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RSS-Reader/1.0)', 'Accept': 'application/rss+xml, text/xml, */*' } },
-  ]
-
-  let xmlText = ''
-  let worked  = false
-
-  for (const instance of nitterInstances) {
-    try {
-      const res = await fetch(instance.url, {
-        headers: instance.headers,
-        signal: AbortSignal.timeout(6000),
-      })
-      if (res.ok) {
-        xmlText = await res.text()
-        if (xmlText.includes('<item>')) { worked = true; break }
-      }
-    } catch { /* try next */ }
-  }
-
-  if (!worked) {
-    // Return helpful message if all instances fail
-    return c.json({
-      success: true,
-      articles: [
-        {
-          id: 'tw-offline-1', type: 'twitter',
-          category: `@${username}`,
-          headline: `Tweets from @${username} are temporarily unavailable`,
-          summary: 'The Twitter mirror (nitter.net) is down right now. This happens sometimes. Please tap Refresh in a few minutes — your real tweets will show up automatically.',
-          image: `https://unavatar.io/twitter/${username}`,
-          source: `@${username} on X/Twitter`,
-          time: 'Just now',
-          url: `https://twitter.com/${username}`,
-          avatar: `https://unavatar.io/twitter/${username}`,
-          isTwitter: true,
-        }
-      ],
-      info: 'Nitter temporarily unavailable'
-    })
-  }
-
-  // Parse RSS XML manually (no DOM parser in Workers)
-  try {
-    const items: any[] = []
-    const itemMatches = xmlText.match(/<item>([\s\S]*?)<\/item>/g) || []
-
-    // Get channel image for avatar
-    const chanImgMatch = xmlText.match(/<image>[\s\S]*?<url>(.*?)<\/url>/i)
-    const avatarUrl = chanImgMatch?.[1]?.trim() ||
-      `https://unavatar.io/twitter/${username}`
-
-    itemMatches.slice(0, 20).forEach((item, i) => {
-      const getTag = (tag: string) => {
-        const m = item.match(new RegExp(`<${tag}[^>]*><!\\[CDATA\\[(.*?)\\]\\]><\\/${tag}>`, 's'))
-                || item.match(new RegExp(`<${tag}[^>]*>(.*?)<\\/${tag}>`, 's'))
-        return m?.[1]?.trim() || ''
-      }
-
-      const title     = getTag('title')
-      const desc      = getTag('description')
-      const link      = getTag('link')
-      const pubDate   = getTag('pubDate')
-      const mediaUrl  = item.match(/url="([^"]+\.(jpg|jpeg|png|webp))"/i)?.[1] || ''
-
-      // Strip HTML from description
-      const cleanDesc = desc.replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim()
-
-      // Format time
-      let timeStr = ''
-      try {
-        timeStr = new Date(pubDate).toLocaleString('en-IN', {
-          hour: 'numeric', minute: 'numeric', hour12: true, month: 'short', day: 'numeric',
-        })
-      } catch { timeStr = pubDate }
-
-      items.push({
-        id: `tw-${i}`,
-        type: 'twitter',
-        category: `@${username}`,
-        headline: title.length > 10 ? title : cleanDesc.substring(0, 120),
-        summary: cleanDesc || title,
-        image: mediaUrl || avatarUrl,
-        source: `@${username} on X/Twitter`,
-        time: timeStr,
-        url: link || `https://twitter.com/${username}`,
-        avatar: avatarUrl,
-        isTwitter: true,
-      })
-    })
-
-    return c.json({ success: true, articles: items })
-  } catch {
-    return c.json({ success: false, error: 'Failed to parse Twitter feed' }, 500)
-  }
+  return c.json({
+    success: true,
+    username,
+    rssUrl: `https://nitter.net/${username}/rss`,
+    profileUrl: `https://twitter.com/${username}`,
+  })
 })
 
 // ── STATIC FILES ──────────────────────────────────────────────────────────────
@@ -425,12 +327,12 @@ if ('serviceWorker' in navigator) {
 async function fetchNews(topic) {
   showLoading();
   try {
-    let url = '/api/news?topic=' + topic;
     if (topic === 'twitter') {
       if (!twitterUser) { showTwitterSetup(); showError('Enter a Twitter username first ☝️'); return; }
-      url = '/api/twitter?username=' + encodeURIComponent(twitterUser);
+      await fetchTwitterFeed(twitterUser);
+      return;
     }
-    const res  = await fetch(url);
+    const res  = await fetch('/api/news?topic=' + topic);
     const data = await res.json();
     if (data.success && data.articles.length > 0) {
       articles = data.articles;
@@ -438,14 +340,86 @@ async function fetchNews(topic) {
       renderCard(); renderDots(); showCard();
       updateCounter(); updateTime();
       document.getElementById('footerBanner').classList.remove('hidden');
-      document.getElementById('bannerText').textContent =
-        (topic === 'twitter' ? '𝕏 ' + twitterUser + "'s feed" : '🇮🇳 ' + topicLabels[topic]);
+      document.getElementById('bannerText').textContent = '🇮🇳 ' + topicLabels[topic];
     } else {
       showError(data.error || 'No articles found.');
     }
   } catch (e) {
     showError('Network error. Check your connection.');
   }
+}
+
+// ── FETCH TWITTER (client-side — browser not blocked by nitter.net) ──────────
+async function fetchTwitterFeed(username) {
+  try {
+    const nitterUrl = 'https://nitter.net/' + username + '/rss';
+    // Try allorigins CORS proxy first (works from browser)
+    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(nitterUrl);
+    let xml = '';
+
+    try {
+      const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(8000)});
+      const j = await r.json();
+      xml = j.contents || '';
+    } catch {}
+
+    // Fallback: direct fetch (browser CORS allows nitter)
+    if (!xml.includes('<item>')) {
+      try {
+        const r = await fetch(nitterUrl, {signal: AbortSignal.timeout(8000)});
+        xml = await r.text();
+      } catch {}
+    }
+
+    if (!xml.includes('<item>')) {
+      showError('Could not load @' + username + ' tweets. nitter.net may be temporarily down. Try again in a few minutes.');
+      return;
+    }
+    parseAndShowTweets(xml, username);
+  } catch (e) {
+    showError('Network error loading Twitter feed.');
+  }
+}
+
+// ── PARSE NITTER RSS XML ──────────────────────────────────────────────────────
+function parseAndShowTweets(xml, username) {
+  const parser  = new DOMParser();
+  const doc     = parser.parseFromString(xml, 'text/xml');
+  const items   = Array.from(doc.querySelectorAll('item'));
+  const chanImg = doc.querySelector('image url');
+  const avatar  = chanImg?.textContent?.trim() || 'https://unavatar.io/twitter/' + username;
+
+  const parsed = items.slice(0, 20).map((item, i) => {
+    const title   = item.querySelector('title')?.textContent?.trim() || '';
+    const desc    = item.querySelector('description')?.textContent?.trim() || '';
+    const link    = item.querySelector('link')?.textContent?.trim() || '';
+    const pubDate = item.querySelector('pubDate')?.textContent?.trim() || '';
+    const imgM    = desc.match(/src="([^"]+\.(jpg|jpeg|png|webp)[^"]*)"/i);
+    const media   = imgM?.[1] || '';
+    const tmp     = document.createElement('div');
+    tmp.innerHTML = desc;
+    const clean   = tmp.textContent?.trim() || '';
+    let timeStr   = '';
+    try { timeStr = new Date(pubDate).toLocaleString('en-IN',{hour:'numeric',minute:'numeric',hour12:true,month:'short',day:'numeric'}); }
+    catch { timeStr = pubDate; }
+    return {
+      id:'tw-'+i, type:'twitter', category:'@'+username,
+      headline: title.length > 10 ? title : clean.substring(0,120),
+      summary: clean || title,
+      image: media || avatar,
+      source: '@'+username+' on X/Twitter',
+      time: timeStr,
+      url: link || 'https://twitter.com/'+username,
+      isTwitter: true,
+    };
+  });
+
+  if (!parsed.length) { showError('No tweets found for @' + username); return; }
+  articles = parsed; currentIndex = 0;
+  renderCard(); renderDots(); showCard();
+  updateCounter(); updateTime();
+  document.getElementById('footerBanner').classList.remove('hidden');
+  document.getElementById('bannerText').textContent = '𝕏 @' + username + "'s live tweets";
 }
 
 // ── RENDER CARD ───────────────────────────────────────────────────────────────
