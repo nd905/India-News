@@ -53,15 +53,13 @@ app.get('/api/news', async (c) => {
   }
 })
 
-// ── 2. TWITTER FEED CONFIG ENDPOINT ─────────────────────────────────────────
-// Returns the nitter RSS URL for the frontend to fetch directly (browser is not blocked)
+// ── 2. TWITTER CONFIG ENDPOINT ──────────────────────────────────────────────
 app.get('/api/twitter-config', async (c) => {
   const username = c.req.query('username') || c.env?.TWITTER_USERNAME || 'Sj89Jain'
   return c.json({
     success: true,
     username,
-    rssUrl: `https://nitter.net/${username}/rss`,
-    profileUrl: `https://twitter.com/${username}`,
+    embedUrl: `https://twitter.com/${username}`,
   })
 })
 
@@ -175,7 +173,7 @@ app.get('/', (c) => {
       <i class="fab fa-x-twitter text-white text-2xl"></i>
       <h2 class="text-white font-extrabold text-lg">Set Your X/Twitter Feed</h2>
     </div>
-    <p class="text-slate-300 text-sm mb-4">Enter any public Twitter/X username to see their posts as news cards.</p>
+    <p class="text-slate-300 text-sm mb-4">Enter any public Twitter/X username to view their timeline.</p>
     <div class="flex items-center bg-slate-700 rounded-xl px-3 py-2 mb-4 border border-white/10 focus-within:border-blue-400">
       <span class="text-slate-400 text-sm mr-1">@</span>
       <input id="twitterInput" type="text" placeholder="e.g. narendramodi"
@@ -192,7 +190,7 @@ app.get('/', (c) => {
         Cancel
       </button>
     </div>
-    <p class="text-slate-500 text-xs mt-3 text-center">Works with any public account · No login needed</p>
+    <p class="text-slate-500 text-xs mt-3 text-center">Uses official Twitter embed · Always works · No login needed</p>
   </div>
 </div>
 
@@ -213,19 +211,41 @@ app.get('/', (c) => {
     <button onclick="refreshNews()" class="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm">Try Again</button>
   </div>
 
-  <!-- Card -->
+  <!-- Twitter Embed View (shown when Twitter tab active) -->
+  <div id="twitterView" class="hidden">
+    <div class="bg-white/5 backdrop-blur rounded-2xl border border-white/10 overflow-hidden">
+      <!-- Header bar -->
+      <div class="flex items-center justify-between px-4 py-3 bg-black/30 border-b border-white/10">
+        <div class="flex items-center gap-2">
+          <i class="fab fa-x-twitter text-white text-lg"></i>
+          <span id="twitterEmbedTitle" class="text-white font-bold text-sm">@Sj89Jain's Feed</span>
+        </div>
+        <a id="twitterOpenLink" href="https://twitter.com/Sj89Jain" target="_blank"
+           class="text-blue-400 text-xs flex items-center gap-1 hover:text-blue-300 transition-all">
+          Open on X <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>
+        </a>
+      </div>
+      <!-- Embedded timeline -->
+      <div id="twitterEmbedContainer" class="min-h-[500px] bg-white rounded-b-2xl overflow-hidden">
+        <!-- Twitter widget injected here -->
+      </div>
+    </div>
+    <!-- Change username button -->
+    <div class="mt-3 text-center">
+      <button onclick="showTwitterSetup()"
+        class="px-4 py-2 bg-blue-500/20 border border-blue-400/40 text-blue-300 rounded-xl text-sm hover:bg-blue-500/30 transition-all">
+        <i class="fab fa-x-twitter mr-1"></i> Change account
+      </button>
+    </div>
+  </div>
+
+  <!-- News Card -->
   <div id="newsCard" class="hidden">
     <div class="relative bg-white rounded-2xl shadow-2xl overflow-hidden card-enter" id="cardInner">
-
-      <!-- Twitter badge (shown only for tweets) -->
-      <div id="twitterBadge" class="hidden absolute top-0 inset-x-0 h-1 bg-blue-400"></div>
 
       <!-- Category badge -->
       <div class="absolute top-4 left-4 z-10 flex items-center gap-1.5">
         <span id="cardCategory" class="px-3 py-1 bg-purple-600/90 text-white text-xs font-bold rounded-full backdrop-blur-sm"></span>
-        <span id="twitterTag" class="hidden px-2 py-1 bg-blue-500/90 text-white text-xs font-bold rounded-full backdrop-blur-sm">
-          <i class="fab fa-x-twitter"></i>
-        </span>
       </div>
 
       <!-- Image -->
@@ -235,7 +255,7 @@ app.get('/', (c) => {
       </div>
 
       <!-- Body -->
-      <div class="p-5" id="twitterBorderCard">
+      <div class="p-5">
         <h2 id="cardHeadline" class="text-lg font-extrabold text-gray-900 mb-2 leading-snug"></h2>
         <p  id="cardSummary"  class="text-gray-600 text-sm leading-relaxed mb-4"></p>
 
@@ -294,6 +314,7 @@ let currentTopic = 'all';
 let twitterUser  = localStorage.getItem('twitterUsername') || 'Sj89Jain';
 let refreshTimer = null;
 let deferredInstall = null;
+let twitterWidgetLoaded = false;
 
 const topicLabels = {
   all:     '🇮🇳 All India', critical:'⚠️ Critical',
@@ -323,15 +344,75 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js').catch(() => {});
 }
 
+// ── TWITTER WIDGET (Official Twitter Embed — 100% reliable) ──────────────────
+function loadTwitterWidget(username) {
+  const container = document.getElementById('twitterEmbedContainer');
+  const title     = document.getElementById('twitterEmbedTitle');
+  const link      = document.getElementById('twitterOpenLink');
+
+  title.textContent = '@' + username + "'s Feed";
+  link.href = 'https://twitter.com/' + username;
+  link.textContent = '';
+  link.innerHTML = 'Open on X <i class="fas fa-arrow-up-right-from-square text-[10px]"></i>';
+
+  // Clear previous embed
+  container.innerHTML = '<div class="flex items-center justify-center py-12"><div class="w-8 h-8 rounded-full border-4 border-blue-400 border-t-transparent spinner"></div><span class="ml-3 text-gray-500 text-sm">Loading tweets…</span></div>';
+
+  // Build official Twitter timeline embed
+  const tweetHtml = '<a class="twitter-timeline" '
+    + 'data-theme="light" '
+    + 'data-height="600" '
+    + 'data-chrome="noheader nofooter noborders" '
+    + 'href="https://twitter.com/' + username + '?ref_src=twsrc%5Etfw">'
+    + 'Tweets by ' + username + '</a>';
+
+  container.innerHTML = tweetHtml;
+
+  // Load or re-run Twitter widgets JS
+  if (window.twttr && window.twttr.widgets) {
+    window.twttr.widgets.load(container);
+  } else {
+    const script = document.createElement('script');
+    script.src = 'https://platform.twitter.com/widgets.js';
+    script.async = true;
+    script.charset = 'utf-8';
+    script.onload = () => {
+      twitterWidgetLoaded = true;
+      if (window.twttr && window.twttr.widgets) {
+        window.twttr.widgets.load(container);
+      }
+    };
+    document.head.appendChild(script);
+  }
+}
+
+// ── SHOW TWITTER VIEW ────────────────────────────────────────────────────────
+function showTwitterView(username) {
+  document.getElementById('loadingState').classList.add('hidden');
+  document.getElementById('errorState').classList.add('hidden');
+  document.getElementById('newsCard').classList.add('hidden');
+  document.getElementById('twitterView').classList.remove('hidden');
+
+  document.getElementById('footerBanner').classList.remove('hidden');
+  document.getElementById('bannerText').textContent = '𝕏 @' + username + "'s live feed · Official Twitter embed";
+
+  // Update counter
+  document.getElementById('counter').textContent = '𝕏';
+  document.getElementById('updateTime').classList.remove('hidden');
+  document.getElementById('updateTime').textContent = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+
+  loadTwitterWidget(username);
+}
+
 // ── FETCH NEWS ────────────────────────────────────────────────────────────────
 async function fetchNews(topic) {
+  if (topic === 'twitter') {
+    showTwitterView(twitterUser);
+    return;
+  }
+
   showLoading();
   try {
-    if (topic === 'twitter') {
-      if (!twitterUser) { showTwitterSetup(); showError('Enter a Twitter username first ☝️'); return; }
-      await fetchTwitterFeed(twitterUser);
-      return;
-    }
     const res  = await fetch('/api/news?topic=' + topic);
     const data = await res.json();
     if (data.success && data.articles.length > 0) {
@@ -349,113 +430,24 @@ async function fetchNews(topic) {
   }
 }
 
-// ── FETCH TWITTER (client-side — browser not blocked by nitter.net) ──────────
-async function fetchTwitterFeed(username) {
-  try {
-    const nitterUrl = 'https://nitter.net/' + username + '/rss';
-    // Try allorigins CORS proxy first (works from browser)
-    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(nitterUrl);
-    let xml = '';
-
-    try {
-      const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(8000)});
-      const j = await r.json();
-      xml = j.contents || '';
-    } catch {}
-
-    // Fallback: direct fetch (browser CORS allows nitter)
-    if (!xml.includes('<item>')) {
-      try {
-        const r = await fetch(nitterUrl, {signal: AbortSignal.timeout(8000)});
-        xml = await r.text();
-      } catch {}
-    }
-
-    if (!xml.includes('<item>')) {
-      showError('Could not load @' + username + ' tweets. nitter.net may be temporarily down. Try again in a few minutes.');
-      return;
-    }
-    parseAndShowTweets(xml, username);
-  } catch (e) {
-    showError('Network error loading Twitter feed.');
-  }
-}
-
-// ── PARSE NITTER RSS XML ──────────────────────────────────────────────────────
-function parseAndShowTweets(xml, username) {
-  const parser  = new DOMParser();
-  const doc     = parser.parseFromString(xml, 'text/xml');
-  const items   = Array.from(doc.querySelectorAll('item'));
-  const chanImg = doc.querySelector('image url');
-  const avatar  = chanImg?.textContent?.trim() || 'https://unavatar.io/twitter/' + username;
-
-  const parsed = items.slice(0, 20).map((item, i) => {
-    const title   = item.querySelector('title')?.textContent?.trim() || '';
-    const desc    = item.querySelector('description')?.textContent?.trim() || '';
-    const link    = item.querySelector('link')?.textContent?.trim() || '';
-    const pubDate = item.querySelector('pubDate')?.textContent?.trim() || '';
-    const imgM    = desc.match(/src="([^"]+\.(jpg|jpeg|png|webp)[^"]*)"/i);
-    const media   = imgM?.[1] || '';
-    const tmp     = document.createElement('div');
-    tmp.innerHTML = desc;
-    const clean   = tmp.textContent?.trim() || '';
-    let timeStr   = '';
-    try { timeStr = new Date(pubDate).toLocaleString('en-IN',{hour:'numeric',minute:'numeric',hour12:true,month:'short',day:'numeric'}); }
-    catch { timeStr = pubDate; }
-    return {
-      id:'tw-'+i, type:'twitter', category:'@'+username,
-      headline: title.length > 10 ? title : clean.substring(0,120),
-      summary: clean || title,
-      image: media || avatar,
-      source: '@'+username+' on X/Twitter',
-      time: timeStr,
-      url: link || 'https://twitter.com/'+username,
-      isTwitter: true,
-    };
-  });
-
-  if (!parsed.length) { showError('No tweets found for @' + username); return; }
-  articles = parsed; currentIndex = 0;
-  renderCard(); renderDots(); showCard();
-  updateCounter(); updateTime();
-  document.getElementById('footerBanner').classList.remove('hidden');
-  document.getElementById('bannerText').textContent = '𝕏 @' + username + "'s live tweets";
-}
-
 // ── RENDER CARD ───────────────────────────────────────────────────────────────
 function renderCard() {
   const a = articles[currentIndex];
   if (!a) return;
 
-  const isTwitter = a.type === 'twitter';
-
   document.getElementById('cardCategory').textContent = a.category;
   document.getElementById('cardHeadline').textContent = a.headline;
   document.getElementById('cardSummary').textContent  = a.summary;
   document.getElementById('cardTime').textContent     = a.time;
-
-  // Source with icon
-  const srcEl = document.getElementById('cardSource');
-  srcEl.innerHTML = isTwitter
-    ? '<i class="fab fa-x-twitter text-blue-400 mr-1"></i>' + a.source
-    : a.source;
-
-  // Twitter styling
-  document.getElementById('twitterBadge').classList.toggle('hidden', !isTwitter);
-  document.getElementById('twitterTag').classList.toggle('hidden', !isTwitter);
-  document.getElementById('twitterBorderCard').className = isTwitter
-    ? 'p-5 border-t-4 border-blue-400'
-    : 'p-5';
-  document.getElementById('readLabel').textContent = isTwitter ? 'Open Tweet' : 'Read Full';
+  document.getElementById('cardSource').textContent   = a.source;
+  document.getElementById('readLabel').textContent    = 'Read Full';
 
   // Image
   const img = document.getElementById('cardImage');
   img.src = a.image || 'https://images.unsplash.com/photo-1524230507669-5ff97982bb5e?w=800&q=80';
   img.alt = a.headline;
   img.onerror = () => {
-    img.src = isTwitter
-      ? 'https://abs.twimg.com/sticky/default_profile_images/default_profile_400x400.png'
-      : 'https://images.unsplash.com/photo-1524230507669-5ff97982bb5e?w=800&q=80';
+    img.src = 'https://images.unsplash.com/photo-1524230507669-5ff97982bb5e?w=800&q=80';
   };
 
   // Save button
@@ -553,6 +545,12 @@ function changeTopic(topic) {
   if (active) active.className = (topic === 'twitter'
     ? 'tab-btn active-tab px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-blue-500 text-white'
     : 'tab-btn active-tab px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-purple-600 text-white');
+
+  // Hide twitter view when switching away
+  if (topic !== 'twitter') {
+    document.getElementById('twitterView').classList.add('hidden');
+  }
+
   fetchNews(topic);
 }
 
@@ -582,7 +580,11 @@ function refreshNews() {
   const btn = document.getElementById('refreshBtn');
   btn.style.transform = 'rotate(360deg)'; btn.style.transition = 'transform .5s';
   setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 500);
-  fetchNews(currentTopic);
+  if (currentTopic === 'twitter') {
+    loadTwitterWidget(twitterUser);
+  } else {
+    fetchNews(currentTopic);
+  }
 }
 
 // ── UI STATES ─────────────────────────────────────────────────────────────────
@@ -590,15 +592,18 @@ function showLoading() {
   document.getElementById('loadingState').classList.remove('hidden');
   document.getElementById('errorState').classList.add('hidden');
   document.getElementById('newsCard').classList.add('hidden');
+  document.getElementById('twitterView').classList.add('hidden');
 }
 function showCard() {
   document.getElementById('loadingState').classList.add('hidden');
   document.getElementById('errorState').classList.add('hidden');
   document.getElementById('newsCard').classList.remove('hidden');
+  document.getElementById('twitterView').classList.add('hidden');
 }
 function showError(msg) {
   document.getElementById('loadingState').classList.add('hidden');
   document.getElementById('newsCard').classList.add('hidden');
+  document.getElementById('twitterView').classList.add('hidden');
   document.getElementById('errorState').classList.remove('hidden');
   document.getElementById('errorMsg').textContent = msg;
 }
@@ -615,7 +620,9 @@ function updateTime() {
 // ── AUTO REFRESH ──────────────────────────────────────────────────────────────
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => fetchNews(currentTopic), 300000);
+  refreshTimer = setInterval(() => {
+    if (currentTopic !== 'twitter') fetchNews(currentTopic);
+  }, 300000);
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
@@ -625,11 +632,6 @@ if (twitterTab && twitterUser) twitterTab.textContent = '𝕏 @' + twitterUser;
 
 fetchNews('all');
 startAutoRefresh();
-
-// Show Twitter setup tip only if user hasn't set a custom username
-if (localStorage.getItem('twitterUsername') === null) {
-  // Default is already @Sj89Jain - no tip needed
-}
 </script>
 </body>
 </html>`)
