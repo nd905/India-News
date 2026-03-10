@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "build": "vite build",
+    "postbuild": "node -e \"require('fs').writeFileSync('dist/.assetsignore','_worker.js\\n_routes.json\\n')\""
+  }
+}
+{
   "name": "webapp",
   "type": "module",
   "scripts": {
