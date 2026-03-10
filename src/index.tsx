@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { serveStatic } from 'hono/cloudflare-workers'
+import { serveStatic } from 'hono/cloudflare-pages'
 
 type Bindings = {
   NEWS_API_KEY: string
@@ -173,7 +173,7 @@ app.get('/api/news', async (c) => {
 })
 
 // ── STATIC FILES ──────────────────────────────────────────────────────────────
-app.use('/static/*', serveStatic({ root: './' }))
+app.use('/static/*', serveStatic())
 
 // ── MAIN PAGE ─────────────────────────────────────────────────────────────────
 app.get('/', (c) => {

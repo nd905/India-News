@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run this script to deploy to Cloudflare Pages
-# Requirements: wrangler logged in (npx wrangler login)
+# Requirements: wrangler logged in or CLOUDFLARE_API_TOKEN set
 
 echo "Building project..."
 npm run build

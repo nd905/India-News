@@ -1,7 +1,24 @@
-"scripts": {
-  "dev": "wrangler dev",
-  "build": "vite build",
-  "postbuild": "node scripts/postbuild.mjs",
-  "deploy": "npm run build && wrangler deploy",
-  "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+{
+  "name": "india-newshorts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "postbuild": "node scripts/postbuild.mjs",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name india-newshorts",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "clean-port": "fuser -k 3000/tcp 2>/dev/null || true"
+  },
+  "dependencies": {
+    "hono": "^4.12.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250305.0",
+    "@hono/vite-cloudflare-pages": "^0.4.2",
+    "@hono/vite-dev-server": "^0.18.2",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "wrangler": "^4.4.0"
+  }
 }
