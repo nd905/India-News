@@ -16,14 +16,8 @@ app.use('/api/*', cors())
 //                  zeenews, RahulGandhi, arvindkejriwal
 // Tech/Others:     Piyush_Goyal, rsprasad
 const FOLLOWING_ACCOUNTS = [
-  // Finance & Markets
-  'Portfolio_Bull', 'ZeeBusiness', 'moneycontrolcom', 'EconomicTimes',
-  'CNBCTV18News', 'livemint', 'bsindia', 'StockMarket_India',
-  // News & Politics
-  'narendramodi', 'nsitharaman', 'ANI', 'PTI_News',
-  'ndtvfeed', 'zeenews', 'RahulGandhi', 'arvindkejriwal',
-  // Tech & Business
-  'Piyush_Goyal', 'rsprasad', 'nirmalasite', 'FinMinIndia',
+  'rimi',
+  'asan',
 ]
 
 // Helper: parse syndication HTML → tweet array
@@ -85,7 +79,7 @@ app.get('/api/timeline', async (c) => {
   const filter = c.req.query('filter') || 'all'
 
   // Fetch top accounts in parallel (pick first 8 for speed)
-  const accountsToFetch = FOLLOWING_ACCOUNTS.slice(0, 12)
+  const accountsToFetch = FOLLOWING_ACCOUNTS
   
   const results = await Promise.allSettled(
     accountsToFetch.map(acc => fetchAccountTweets(acc))
@@ -394,13 +388,22 @@ app.get('/', (c) => {
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 const FILTERS = {
+  cricket:  /cricket|bcci|ipl|virat|rohit|dhoni|bumrah|test match|odi|t20|world cup|rcb|csk|mi |kkr|srh|wicket|batting|bowling|innings|pitch|stadium/i,
+  finance:  /sensex|nifty|bse|nse|rupee|rbi|gdp|inflation|budget|ipo|stock|share|market|economy|finance|sebi|mutual fund|smallcap|midcap|largecap|₹|profit|loss|revenue|invest|bull|bear|trading/i,
+  politics: /modi|bjp|congress|aap|parliament|lok sabha|rajya sabha|election|cm |chief minister|minister|governor|pm |prime minister|rahul|kejriwal|yogi|mamata|vote|political|party|govt|government/i,
+  tech:     /ai |artificial intelligence|startup|5g|isro|space|tech|digital india|chandrayaan|software|app launch|coding|machine learning|blockchain|crypto|cybersecurity|iot|cloud|data|robot/i,
   india:    /india|bharat|modi|delhi|mumbai|chennai|bengaluru|kolkata|hyderabad|bjp|congress|ipl|lok sabha|rajya sabha|rupee|rbi|sensex|nifty|bse|nse|sebi/i,
-  politics: /modi|bjp|congress|aap|parliament|lok sabha|rajya sabha|election|cm |chief minister|minister|governor|pm |prime minister|rahul|kejriwal|yogi|mamata/i,
-  finance:  /sensex|nifty|bse|nse|rupee|rbi|gdp|inflation|budget|ipo|stock|share|market|economy|finance|sebi|mutual fund|smallcap|midcap|largecap|₹/i,
-  cricket:  /cricket|bcci|ipl|virat|rohit|dhoni|bumrah|test match|odi|t20|world cup|rcb|csk|mi |kkr|srh/i,
-  tech:     /ai |artificial intelligence|startup|5g|isro|space|tech|digital india|chandrayaan|software|app launch|coding/i,
 };
 const INDIA_FILTER = FILTERS.india;
+
+function classifySection(text) {
+  if (FILTERS.cricket.test(text))  return 'cricket';
+  if (FILTERS.finance.test(text))  return 'finance';
+  if (FILTERS.politics.test(text)) return 'politics';
+  if (FILTERS.tech.test(text))     return 'tech';
+  if (FILTERS.india.test(text))    return 'india';
+  return 'all';
+}
 
 let allTweets = [], shownCount = 20, currentFilter = 'all', twitterMode = true;
 let newsArticles = [], newsIdx = 0, newsTopic = 'all';
@@ -457,7 +460,10 @@ async function loadTimeline() {
     const res = await fetch('/api/timeline');
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Failed to load feed');
-    allTweets = data.tweets || [];
+    allTweets = (data.tweets || []).map(t => ({
+      ...t,
+      section: classifySection(t.text || '')
+    }));
     renderFeed();
     updateStats();
   } catch(e) {
@@ -470,9 +476,13 @@ async function loadTimeline() {
 }
 
 function getFiltered() {
-  if (currentFilter === 'all') return allTweets;
-  const re = FILTERS[currentFilter];
-  return re ? allTweets.filter(t => re.test(t.text)) : allTweets;
+  let list;
+  if (currentFilter === 'all') {
+    list = allTweets;
+  } else {
+    list = allTweets.filter(t => t.section === currentFilter);
+  }
+  return list.slice(0, 2);
 }
 
 function renderFeed() {
@@ -485,7 +495,7 @@ function renderFeed() {
   }
   const shown = tweets.slice(0, shownCount);
   feed.innerHTML = shown.map(renderCard).join('');
-  document.getElementById('loadMoreWrap').style.display = tweets.length > shownCount ? 'block' : 'none';
+  document.getElementById('loadMoreWrap').style.display = 'none';
 }
 
 function showMore() {
@@ -652,9 +662,15 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 
 function formatText(raw) {
   let t = esc(raw);
+  // Preserve line breaks
+  t = t.replace(/\\n/g, '<br>');
   t = t.replace(/#(\\w+)/g,'<span class="hashtag">#$1</span>');
   t = t.replace(/@(\\w+)/g,'<span class="mention">@$1</span>');
-  t = t.replace(/https?:\\/\\/[^\\s]+/g, url => \`<a href="\${url}" onclick="event.stopPropagation()" target="_blank" rel="noopener">\${url.replace(/^https?:\\/\\//,'').substring(0,30)}…</a>\`);
+  t = t.replace(/https?:\\/\\/[^\\s<]+/g, url => {
+    const clean = url.replace(/^https?:\\/\\//,'').replace(/\\/$/,'');
+    const short = clean.length > 30 ? clean.substring(0,30) + '…' : clean;
+    return \`<a href="\${url}" onclick="event.stopPropagation()" target="_blank" rel="noopener">\${short}</a>\`;
+  });
   return t;
 }
 
